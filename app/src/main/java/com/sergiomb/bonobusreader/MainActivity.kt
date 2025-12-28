@@ -345,48 +345,48 @@ fun HomeScreen(
         if (cardId == lastCardId && now - lastReadAt < 2500) {
             saldoTexto = "⚠️ Tarjeta ya leída recientemente"
             uiState = ReadingUiState.ERROR
-            return@onTagDetected
-        }
-        lastCardId = cardId
-        lastReadAt = now
-        activity.readRedCard(tag)?.let { saldo ->
-            cardType = CardType.RED
-            val savedCard = activity.findSavedCard(cardId)
-            cardName = savedCard?.name
-            saldoTexto = "💳 Saldo actual: %.2f €".format(saldo)
-            if (savedCard != null) {
-                activity.saveCardEntry(cardId, "Roja", saldo)
-                uiState = ReadingUiState.SUCCESS
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onOpenHistory(cardId)
-            } else {
-                pendingCardId = cardId
-                pendingBalance = saldo
-                pendingCardType = CardType.RED
-                showSaveDialog = true
-            }
-        } ?: run {
-            activity.readGreenCard(tag)?.let { saldo ->
-                cardType = CardType.GREEN
+        } else {
+            lastCardId = cardId
+            lastReadAt = now
+            activity.readRedCard(tag)?.let { saldo ->
+                cardType = CardType.RED
                 val savedCard = activity.findSavedCard(cardId)
                 cardName = savedCard?.name
                 saldoTexto = "💳 Saldo actual: %.2f €".format(saldo)
                 if (savedCard != null) {
-                    activity.saveCardEntry(cardId, "Verde", saldo)
+                    activity.saveCardEntry(cardId, "Roja", saldo)
                     uiState = ReadingUiState.SUCCESS
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onOpenHistory(cardId)
                 } else {
                     pendingCardId = cardId
                     pendingBalance = saldo
-                    pendingCardType = CardType.GREEN
+                    pendingCardType = CardType.RED
                     showSaveDialog = true
                 }
             } ?: run {
-                cardType = CardType.UNKNOWN
-                cardName = null
-                saldoTexto = "❌ No se pudo leer la tarjeta"
-                uiState = ReadingUiState.ERROR
+                activity.readGreenCard(tag)?.let { saldo ->
+                    cardType = CardType.GREEN
+                    val savedCard = activity.findSavedCard(cardId)
+                    cardName = savedCard?.name
+                    saldoTexto = "💳 Saldo actual: %.2f €".format(saldo)
+                    if (savedCard != null) {
+                        activity.saveCardEntry(cardId, "Verde", saldo)
+                        uiState = ReadingUiState.SUCCESS
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onOpenHistory(cardId)
+                    } else {
+                        pendingCardId = cardId
+                        pendingBalance = saldo
+                        pendingCardType = CardType.GREEN
+                        showSaveDialog = true
+                    }
+                } ?: run {
+                    cardType = CardType.UNKNOWN
+                    cardName = null
+                    saldoTexto = "❌ No se pudo leer la tarjeta"
+                    uiState = ReadingUiState.ERROR
+                }
             }
         }
     }
