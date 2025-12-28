@@ -314,7 +314,6 @@ fun HomeScreen(
                         saldoTexto = "💳 Saldo actual: %.2f €".format(balance)
                         uiState = ReadingUiState.SUCCESS
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onOpenHistory(cardId)
                     }
                     nameInput = ""
                     pendingCardId = null
@@ -357,7 +356,6 @@ fun HomeScreen(
                     activity.saveCardEntry(cardId, "Roja", saldo)
                     uiState = ReadingUiState.SUCCESS
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onOpenHistory(cardId)
                 } else {
                     pendingCardId = cardId
                     pendingBalance = saldo
@@ -374,7 +372,6 @@ fun HomeScreen(
                         activity.saveCardEntry(cardId, "Verde", saldo)
                         uiState = ReadingUiState.SUCCESS
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onOpenHistory(cardId)
                     } else {
                         pendingCardId = cardId
                         pendingBalance = saldo
