@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.compose.NavHost
@@ -40,7 +41,14 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 
 enum class CardType { RED, GREEN, UNKNOWN }
 
-data class CardReadEntry(val timestamp: Long, val cardType: String, val balance: Float)
+data class CardReadEntry(
+    val timestamp: Long,
+    val cardId: String? = null,
+    val cardType: String,
+    val balance: Float
+)
+
+data class SavedCard(val id: String, val name: String, val type: String)
 
 class MainActivity : ComponentActivity() {
 
@@ -63,11 +71,16 @@ class MainActivity : ComponentActivity() {
                     composable("home") {
                         HomeScreen(
                             onShowHistory = { navController.navigate("history") },
+                            onOpenHistory = { cardId -> navController.navigate("history/$cardId") },
                             onTagDetectedCallback = { tag -> onTagDetected(tag) }
                         )
                     }
                     composable("history") {
                         HistoryScreen(onBack = { navController.popBackStack() })
+                    }
+                    composable("history/{cardId}") { backStackEntry ->
+                        val cardId = backStackEntry.arguments?.getString("cardId")
+                        HistoryScreen(onBack = { navController.popBackStack() }, cardId = cardId)
                     }
                 }
             }
@@ -94,8 +107,8 @@ class MainActivity : ComponentActivity() {
         tag?.let { onTagDetected(it) }
     }
 
-    fun saveCardEntry(cardType: String, balance: Float) {
-        val entry = CardReadEntry(System.currentTimeMillis(), cardType, balance)
+    fun saveCardEntry(cardId: String, cardType: String, balance: Float) {
+        val entry = CardReadEntry(System.currentTimeMillis(), cardId, cardType, balance)
         val sharedPrefs = getSharedPreferences("bonobus_prefs", MODE_PRIVATE)
         val gson = Gson()
         val currentList = loadHistory().toMutableList()
@@ -111,13 +124,31 @@ class MainActivity : ComponentActivity() {
         return Gson().fromJson(json, type)
     }
 
-    fun deleteEntries(indices: List<Int>) {
+    fun deleteEntries(entries: List<CardReadEntry>) {
         val sharedPrefs = getSharedPreferences("bonobus_prefs", MODE_PRIVATE)
         val gson = Gson()
         val currentList = loadHistory().toMutableList()
-        indices.sortedDescending().forEach { currentList.removeAt(it) }
+        entries.forEach { currentList.remove(it) }
         sharedPrefs.edit().putString("history", gson.toJson(currentList)).apply()
     }
+
+    fun loadSavedCards(): List<SavedCard> {
+        val sharedPrefs = getSharedPreferences("bonobus_prefs", MODE_PRIVATE)
+        val json = sharedPrefs.getString("cards", "[]")
+        val type = object : TypeToken<List<SavedCard>>() {}.type
+        return Gson().fromJson(json, type)
+    }
+
+    fun saveCard(card: SavedCard) {
+        val sharedPrefs = getSharedPreferences("bonobus_prefs", MODE_PRIVATE)
+        val gson = Gson()
+        val currentList = loadSavedCards().toMutableList()
+        currentList.removeAll { it.id == card.id }
+        currentList.add(card)
+        sharedPrefs.edit().putString("cards", gson.toJson(currentList)).apply()
+    }
+
+    fun findSavedCard(cardId: String): SavedCard? = loadSavedCards().firstOrNull { it.id == cardId }
 
     fun readRedCard(tag: Tag): Float? {
         val mfc = MifareClassic.get(tag)
@@ -157,31 +188,154 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun HomeScreen(onShowHistory: () -> Unit, onTagDetectedCallback: (Tag) -> Unit) {
+@OptIn(ExperimentalMaterial3Api::class)
+fun HomeScreen(
+    onShowHistory: () -> Unit,
+    onOpenHistory: (String) -> Unit,
+    onTagDetectedCallback: (Tag) -> Unit
+) {
     val activity = LocalContext.current as MainActivity
     var saldoTexto by remember { mutableStateOf("📲 Acerca tu bonobús...") }
     var cardType by remember { mutableStateOf(CardType.UNKNOWN) }
+    var cardName by remember { mutableStateOf<String?>(null) }
+    var pendingCardId by remember { mutableStateOf<String?>(null) }
+    var pendingBalance by remember { mutableStateOf<Float?>(null) }
+    var pendingCardType by remember { mutableStateOf<CardType?>(null) }
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var showNameDialog by remember { mutableStateOf(false) }
+    var nameInput by remember { mutableStateOf("") }
+
+    if (showSaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveDialog = false },
+            title = { Text("Nueva tarjeta detectada") },
+            text = { Text("¿Quieres guardar esta tarjeta para acceder a su histórico personal?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSaveDialog = false
+                    showNameDialog = true
+                }) {
+                    Text("Guardar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveDialog = false }) {
+                    Text("Ahora no")
+                }
+            }
+        )
+    }
+
+    if (showNameDialog) {
+        AlertDialog(
+            onDismissRequest = { showNameDialog = false },
+            title = { Text("Nombre de la tarjeta") },
+            text = {
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Ej. Bonobús de Ana") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val cardId = pendingCardId
+                    val balance = pendingBalance
+                    val type = pendingCardType
+                    if (cardId != null && balance != null && type != null) {
+                        val safeName = nameInput.ifBlank {
+                            when (type) {
+                                CardType.RED -> "CrediBus Granada"
+                                CardType.GREEN -> "Bonobús Andalucía"
+                                else -> "Bonobús"
+                            }
+                        }
+                        val typeLabel = when (type) {
+                            CardType.RED -> "Roja"
+                            CardType.GREEN -> "Verde"
+                            else -> "Desconocida"
+                        }
+                        activity.saveCard(SavedCard(cardId, safeName, typeLabel))
+                        activity.saveCardEntry(cardId, typeLabel, balance)
+                        cardName = safeName
+                        saldoTexto = "💳 Saldo actual: %.2f €".format(balance)
+                        onOpenHistory(cardId)
+                    }
+                    nameInput = ""
+                    pendingCardId = null
+                    pendingBalance = null
+                    pendingCardType = null
+                    showNameDialog = false
+                }) {
+                    Text("Guardar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    nameInput = ""
+                    pendingCardId = null
+                    pendingBalance = null
+                    pendingCardType = null
+                    showNameDialog = false
+                }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
 
     activity.onTagDetected = { tag ->
+        val cardId = tag.id.joinToString("") { byte -> "%02X".format(byte) }
         activity.readRedCard(tag)?.let { saldo ->
             cardType = CardType.RED
+            val savedCard = activity.findSavedCard(cardId)
+            cardName = savedCard?.name
             saldoTexto = "💳 Saldo actual: %.2f €".format(saldo)
-            activity.saveCardEntry("Roja", saldo)
+            if (savedCard != null) {
+                activity.saveCardEntry(cardId, "Roja", saldo)
+                onOpenHistory(cardId)
+            } else {
+                pendingCardId = cardId
+                pendingBalance = saldo
+                pendingCardType = CardType.RED
+                showSaveDialog = true
+            }
         } ?: run {
             activity.readGreenCard(tag)?.let { saldo ->
                 cardType = CardType.GREEN
+                val savedCard = activity.findSavedCard(cardId)
+                cardName = savedCard?.name
                 saldoTexto = "💳 Saldo actual: %.2f €".format(saldo)
-                activity.saveCardEntry("Verde", saldo)
+                if (savedCard != null) {
+                    activity.saveCardEntry(cardId, "Verde", saldo)
+                    onOpenHistory(cardId)
+                } else {
+                    pendingCardId = cardId
+                    pendingBalance = saldo
+                    pendingCardType = CardType.GREEN
+                    showSaveDialog = true
+                }
             } ?: run {
                 cardType = CardType.UNKNOWN
+                cardName = null
                 saldoTexto = "❌ No se pudo leer la tarjeta"
             }
         }
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("BonobusNFCReader") }
+            )
+        }
+    ) { paddingValues ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -196,25 +350,59 @@ fun HomeScreen(onShowHistory: () -> Unit, onTagDetectedCallback: (Tag) -> Unit) 
                 else -> "Bonobús no detectado"
             }
 
-            Text(text = title, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
-            Box(modifier = Modifier.width(280.dp).height(160.dp).background(bgColor, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
-                Text(text = saldoTexto, color = Color.White, fontSize = 22.sp)
+            ElevatedCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp),
+                colors = CardDefaults.elevatedCardColors(containerColor = bgColor),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = cardName ?: title,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                        if (cardName != null) {
+                            Text(text = title, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
+                        }
+                    }
+                    Text(text = saldoTexto, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                }
             }
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Acerca una tarjeta para ver su saldo y acceder a su histórico personal.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
             Button(onClick = onShowHistory) {
                 Text("Ver histórico")
             }
         }
     }
 }
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryScreen(onBack: () -> Unit) {
+fun HistoryScreen(onBack: () -> Unit, cardId: String? = null) {
     val context = LocalContext.current as MainActivity
     var historyList by remember { mutableStateOf(context.loadHistory()) }
-    val selectedItems = remember { mutableStateListOf<Int>() }
+    val selectedItems = remember { mutableStateListOf<CardReadEntry>() }
     var selectionMode by remember { mutableStateOf(false) }
     var showDialog by remember { mutableStateOf(false) }
+    val cardName = remember(cardId) { cardId?.let { context.findSavedCard(it)?.name } }
+    val filteredHistory = remember(historyList, cardId) {
+        if (cardId == null) historyList else historyList.filter { it.cardId == cardId }
+    }
+    val titleText = cardName ?: if (cardId != null) "Histórico de tarjeta" else "Histórico de lecturas"
 
     if (showDialog) {
         AlertDialog(
@@ -240,44 +428,60 @@ fun HistoryScreen(onBack: () -> Unit) {
         )
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("📜 Histórico de lecturas", fontSize = 22.sp, modifier = Modifier.weight(1f))
-                if (selectionMode && selectedItems.isNotEmpty()) {
-                    IconButton(onClick = { showDialog = true }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Eliminar")
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(titleText) },
+                actions = {
+                    if (selectionMode && selectedItems.isNotEmpty()) {
+                        IconButton(onClick = { showDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Eliminar")
+                        }
                     }
                 }
-            }
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp)
+        ) {
             LazyColumn(modifier = Modifier.weight(1f)) {
-                itemsIndexed(historyList) { index, entry ->
+                itemsIndexed(filteredHistory) { index, entry ->
                     val fecha = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("es", "ES")).format(Date(entry.timestamp))
-                    val isSelected = selectedItems.contains(index)
-                    val bgColor = if (isSelected) Color(0xFFDDDDDD) else Color(0xFFF5F5F5)
+                    val isSelected = selectedItems.contains(entry)
+                    val baseColor = when (entry.cardType) {
+                        "Roja" -> Color(0xFFFFEBEE)
+                        "Verde" -> Color(0xFFE8F5E9)
+                        else -> Color(0xFFF5F5F5)
+                    }
+                    val bgColor = if (isSelected) Color(0xFFDDDDDD) else baseColor
 
-                    Card(
+                    ElevatedCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 6.dp)
                             .combinedClickable(
                                 onClick = {
                                     if (selectionMode) {
-                                        if (isSelected) selectedItems.remove(index) else selectedItems.add(index)
+                                        if (isSelected) selectedItems.remove(entry) else selectedItems.add(entry)
                                     }
                                 },
                                 onLongClick = {
                                     if (!selectionMode) {
                                         selectionMode = true
-                                        selectedItems.add(index)
+                                        selectedItems.add(entry)
                                     }
                                 }
                             ),
-                        colors = CardDefaults.cardColors(containerColor = bgColor)
+                        colors = CardDefaults.elevatedCardColors(containerColor = bgColor)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Fecha: $fecha", fontSize = 16.sp)
-                            Text("Tarjeta ${entry.cardType} -> %.2f €".format(entry.balance), fontSize = 16.sp)
+                            Text(fecha, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Tarjeta ${entry.cardType}", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            Text("Saldo: %.2f €".format(entry.balance), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
