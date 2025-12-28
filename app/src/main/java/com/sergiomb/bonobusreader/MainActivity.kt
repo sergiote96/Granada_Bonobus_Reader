@@ -344,7 +344,6 @@ fun HomeScreen(
         val cardId = tag.id.joinToString("") { byte -> "%02X".format(byte) }
         val now = System.currentTimeMillis()
         if (cardId == lastCardId && now - lastReadAt < 2500) {
-            saldoTexto = "⚠️ Tarjeta ya leída recientemente"
             uiState = ReadingUiState.ERROR
         } else {
             lastCardId = cardId
