@@ -189,6 +189,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun HomeScreen(
     onShowHistory: () -> Unit,
     onOpenHistory: (String) -> Unit,
@@ -327,12 +328,7 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("BonobusNFCReader") },
-                actions = {
-                    IconButton(onClick = onShowHistory) {
-                        Icon(Icons.Default.History, contentDescription = "Ver histórico")
-                    }
-                }
+                title = { Text("BonobusNFCReader") }
             )
         }
     ) { paddingValues ->
@@ -397,6 +393,7 @@ fun HomeScreen(
 }
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun HistoryScreen(onBack: () -> Unit, cardId: String? = null) {
     val context = LocalContext.current as MainActivity
     var historyList by remember { mutableStateOf(context.loadHistory()) }
