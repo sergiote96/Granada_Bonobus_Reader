@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.Image
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -27,6 +28,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -419,6 +421,11 @@ fun HomeScreen(
                 CardType.GREEN -> "Bonobús Consorcio Transportes Andalucía"
                 else -> "Bonobús no detectado"
             }
+            val logoRes = when (cardType) {
+                CardType.RED -> R.drawable.logo_credibus_granada
+                CardType.GREEN -> R.drawable.logo_consorcio_andalucia
+                else -> null
+            }
 
             ElevatedCard(
                 modifier = Modifier
@@ -434,6 +441,15 @@ fun HomeScreen(
                         .background(gradient)
                         .padding(20.dp)
                 ) {
+                    if (logoRes != null) {
+                        Image(
+                            painter = painterResource(id = logoRes),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(48.dp)
+                        )
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
