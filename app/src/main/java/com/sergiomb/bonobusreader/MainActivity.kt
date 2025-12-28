@@ -391,9 +391,8 @@ fun HomeScreen(
         }
     }
 }
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
 fun HistoryScreen(onBack: () -> Unit, cardId: String? = null) {
     val context = LocalContext.current as MainActivity
     var historyList by remember { mutableStateOf(context.loadHistory()) }
