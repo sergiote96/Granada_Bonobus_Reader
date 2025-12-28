@@ -46,9 +46,7 @@ import java.util.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import kotlinx.coroutines.delay
 
@@ -224,19 +222,19 @@ fun HomeScreen(
     var showNameDialog by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf("") }
     val haptic = LocalHapticFeedback.current
-    val pulseTransition = rememberInfiniteTransition(label = "nfcPulse")
-    val pulseAlpha by pulseTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(animation = tween(durationMillis = 1200)),
-        label = "nfcPulseAlpha"
-    )
+    val pulseAlpha = remember { Animatable(0.4f) }
     val cardScale by animateFloatAsState(
         targetValue = if (uiState == ReadingUiState.SUCCESS) 1.02f else 1f,
-        animationSpec = tween(durationMillis = 220),
-        label = "cardScale"
+        animationSpec = tween(durationMillis = 220)
     )
     val errorOffsetX = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            pulseAlpha.animateTo(1f, animationSpec = tween(durationMillis = 600))
+            pulseAlpha.animateTo(0.4f, animationSpec = tween(durationMillis = 600))
+        }
+    }
 
     LaunchedEffect(uiState) {
         if (uiState == ReadingUiState.ERROR) {
@@ -486,7 +484,7 @@ fun HomeScreen(
                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                                 shape = RoundedCornerShape(32.dp)
                             )
-                            .alpha(pulseAlpha),
+                            .alpha(pulseAlpha.value),
                         contentAlignment = Alignment.Center
                     ) {
                         Text("NFC", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
