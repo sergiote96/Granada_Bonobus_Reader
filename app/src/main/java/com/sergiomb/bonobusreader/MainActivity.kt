@@ -396,14 +396,25 @@ fun HomeScreen(
 fun HistoryScreen(onBack: () -> Unit, cardId: String? = null) {
     val context = LocalContext.current as MainActivity
     var historyList by remember { mutableStateOf(context.loadHistory()) }
+    var savedCards by remember { mutableStateOf(context.loadSavedCards()) }
     val selectedItems = remember { mutableStateListOf<CardReadEntry>() }
     var selectionMode by remember { mutableStateOf(false) }
     var showDialog by remember { mutableStateOf(false) }
-    val cardName = remember(cardId) { cardId?.let { context.findSavedCard(it)?.name } }
-    val filteredHistory = remember(historyList, cardId) {
-        if (cardId == null) historyList else historyList.filter { it.cardId == cardId }
+    var selectedCardId by remember { mutableStateOf(cardId) }
+    var dropdownExpanded by remember { mutableStateOf(false) }
+    val selectedCardName = remember(selectedCardId, savedCards) {
+        selectedCardId?.let { id -> savedCards.firstOrNull { it.id == id }?.name }
     }
-    val titleText = cardName ?: if (cardId != null) "Histórico de tarjeta" else "Histórico de lecturas"
+    val filteredHistory = remember(historyList, selectedCardId) {
+        if (selectedCardId == null) historyList.filter { it.cardId == null }
+        else historyList.filter { it.cardId == selectedCardId }
+    }
+    val titleText = selectedCardName ?: if (selectedCardId != null) "Histórico de tarjeta" else "Histórico sin registrar"
+
+    LaunchedEffect(selectedCardId) {
+        selectedItems.clear()
+        selectionMode = false
+    }
 
     if (showDialog) {
         AlertDialog(
@@ -414,6 +425,7 @@ fun HistoryScreen(onBack: () -> Unit, cardId: String? = null) {
                 TextButton(onClick = {
                     context.deleteEntries(selectedItems.toList())
                     historyList = context.loadHistory()
+                    savedCards = context.loadSavedCards()
                     selectedItems.clear()
                     selectionMode = false
                     showDialog = false
@@ -432,7 +444,42 @@ fun HistoryScreen(onBack: () -> Unit, cardId: String? = null) {
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(titleText) },
+                title = {
+                    ExposedDropdownMenuBox(
+                        expanded = dropdownExpanded,
+                        onExpandedChange = { dropdownExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = titleText,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Historial") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                            modifier = Modifier.menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = dropdownExpanded,
+                            onDismissRequest = { dropdownExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Sin registrar") },
+                                onClick = {
+                                    selectedCardId = null
+                                    dropdownExpanded = false
+                                }
+                            )
+                            savedCards.forEach { card ->
+                                DropdownMenuItem(
+                                    text = { Text(card.name) },
+                                    onClick = {
+                                        selectedCardId = card.id
+                                        dropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                },
                 actions = {
                     if (selectionMode && selectedItems.isNotEmpty()) {
                         IconButton(onClick = { showDialog = true }) {
