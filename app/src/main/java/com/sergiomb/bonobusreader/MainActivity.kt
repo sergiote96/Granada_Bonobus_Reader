@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
@@ -22,8 +23,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,9 +44,18 @@ import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.*
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import kotlinx.coroutines.delay
 
 
 enum class CardType { RED, GREEN, UNKNOWN }
+
+enum class ReadingUiState { WAITING, SUCCESS, ERROR }
 
 data class CardReadEntry(
     val timestamp: Long,
@@ -199,12 +214,50 @@ fun HomeScreen(
     var saldoTexto by remember { mutableStateOf("📲 Acerca tu bonobús...") }
     var cardType by remember { mutableStateOf(CardType.UNKNOWN) }
     var cardName by remember { mutableStateOf<String?>(null) }
+    var uiState by remember { mutableStateOf(ReadingUiState.WAITING) }
+    var lastCardId by remember { mutableStateOf<String?>(null) }
+    var lastReadAt by remember { mutableStateOf(0L) }
     var pendingCardId by remember { mutableStateOf<String?>(null) }
     var pendingBalance by remember { mutableStateOf<Float?>(null) }
     var pendingCardType by remember { mutableStateOf<CardType?>(null) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf("") }
+    val haptic = LocalHapticFeedback.current
+    val pulseTransition = rememberInfiniteTransition(label = "nfcPulse")
+    val pulseAlpha by pulseTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(durationMillis = 1200)),
+        label = "nfcPulseAlpha"
+    )
+    val cardScale by animateFloatAsState(
+        targetValue = if (uiState == ReadingUiState.SUCCESS) 1.02f else 1f,
+        animationSpec = tween(durationMillis = 220),
+        label = "cardScale"
+    )
+    val errorOffsetX = remember { Animatable(0f) }
+
+    LaunchedEffect(uiState) {
+        if (uiState == ReadingUiState.ERROR) {
+            errorOffsetX.animateTo(
+                targetValue = 0f,
+                animationSpec = keyframes {
+                    durationMillis = 360
+                    0f at 0
+                    -16f at 60
+                    16f at 120
+                    -12f at 180
+                    12f at 240
+                    0f at 360
+                }
+            )
+        }
+        if (uiState == ReadingUiState.SUCCESS || uiState == ReadingUiState.ERROR) {
+            delay(1800)
+            uiState = ReadingUiState.WAITING
+        }
+    }
 
     if (showSaveDialog) {
         AlertDialog(
@@ -261,6 +314,8 @@ fun HomeScreen(
                         activity.saveCardEntry(cardId, typeLabel, balance)
                         cardName = safeName
                         saldoTexto = "💳 Saldo actual: %.2f €".format(balance)
+                        uiState = ReadingUiState.SUCCESS
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onOpenHistory(cardId)
                     }
                     nameInput = ""
@@ -288,6 +343,14 @@ fun HomeScreen(
 
     activity.onTagDetected = { tag ->
         val cardId = tag.id.joinToString("") { byte -> "%02X".format(byte) }
+        val now = System.currentTimeMillis()
+        if (cardId == lastCardId && now - lastReadAt < 2500) {
+            saldoTexto = "⚠️ Tarjeta ya leída recientemente"
+            uiState = ReadingUiState.ERROR
+            return@onTagDetected
+        }
+        lastCardId = cardId
+        lastReadAt = now
         activity.readRedCard(tag)?.let { saldo ->
             cardType = CardType.RED
             val savedCard = activity.findSavedCard(cardId)
@@ -295,6 +358,8 @@ fun HomeScreen(
             saldoTexto = "💳 Saldo actual: %.2f €".format(saldo)
             if (savedCard != null) {
                 activity.saveCardEntry(cardId, "Roja", saldo)
+                uiState = ReadingUiState.SUCCESS
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 onOpenHistory(cardId)
             } else {
                 pendingCardId = cardId
@@ -310,6 +375,8 @@ fun HomeScreen(
                 saldoTexto = "💳 Saldo actual: %.2f €".format(saldo)
                 if (savedCard != null) {
                     activity.saveCardEntry(cardId, "Verde", saldo)
+                    uiState = ReadingUiState.SUCCESS
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onOpenHistory(cardId)
                 } else {
                     pendingCardId = cardId
@@ -321,6 +388,7 @@ fun HomeScreen(
                 cardType = CardType.UNKNOWN
                 cardName = null
                 saldoTexto = "❌ No se pudo leer la tarjeta"
+                uiState = ReadingUiState.ERROR
             }
         }
     }
@@ -340,10 +408,16 @@ fun HomeScreen(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            val bgColor = when (cardType) {
-                CardType.RED -> Color(0xFFB71C1C)
-                CardType.GREEN -> Color(0xFF1B5E20)
-                else -> Color.DarkGray
+            val gradient = when (cardType) {
+                CardType.RED -> Brush.linearGradient(
+                    colors = listOf(Color(0xFFFFCDD2), Color(0xFFD32F2F))
+                )
+                CardType.GREEN -> Brush.linearGradient(
+                    colors = listOf(Color(0xFFC8E6C9), Color(0xFF00C853))
+                )
+                else -> Brush.linearGradient(
+                    colors = listOf(Color(0xFF424242), Color(0xFF212121))
+                )
             }
             val title = when (cardType) {
                 CardType.RED -> "CrediBus Granada"
@@ -354,28 +428,87 @@ fun HomeScreen(
             ElevatedCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp),
-                colors = CardDefaults.elevatedCardColors(containerColor = bgColor),
+                    .height(190.dp)
+                    .scale(cardScale),
+                colors = CardDefaults.elevatedCardColors(containerColor = Color.Transparent),
                 shape = RoundedCornerShape(20.dp)
             ) {
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(20.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
+                        .background(gradient)
+                        .padding(20.dp)
                 ) {
-                    Column {
-                        Text(
-                            text = cardName ?: title,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                        if (cardName != null) {
-                            Text(text = title, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .offset(x = errorOffsetX.value.dp),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = cardName ?: title,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                            if (cardName != null) {
+                                Text(text = title, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f))
+                            }
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = saldoTexto,
+                                color = Color.White,
+                                fontSize = 30.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = when (cardType) {
+                                    CardType.RED -> "Tarjeta urbana (Roja)"
+                                    CardType.GREEN -> "Tarjeta interurbana (Verde)"
+                                    else -> "Esperando lectura NFC"
+                                },
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 15.sp
+                            )
                         }
                     }
-                    Text(text = saldoTexto, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            when (uiState) {
+                ReadingUiState.WAITING -> {
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(32.dp)
+                            )
+                            .alpha(pulseAlpha),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("NFC", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                ReadingUiState.SUCCESS -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF2E7D32)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Lectura correcta", color = Color(0xFF2E7D32))
+                    }
+                }
+                ReadingUiState.ERROR -> {
+                    Text(
+                        text = "Error de lectura. Inténtalo de nuevo.",
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
@@ -500,12 +633,12 @@ fun HistoryScreen(onBack: () -> Unit, cardId: String? = null) {
                 itemsIndexed(filteredHistory) { index, entry ->
                     val fecha = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("es", "ES")).format(Date(entry.timestamp))
                     val isSelected = selectedItems.contains(entry)
-                    val baseColor = when (entry.cardType) {
-                        "Roja" -> Color(0xFFFFEBEE)
-                        "Verde" -> Color(0xFFE8F5E9)
+                    val accentColor = when (entry.cardType) {
+                        "Roja" -> Color(0xFFD32F2F)
+                        "Verde" -> Color(0xFF00C853)
                         else -> Color(0xFFF5F5F5)
                     }
-                    val bgColor = if (isSelected) Color(0xFFDDDDDD) else baseColor
+                    val bgColor = if (isSelected) Color(0xFFE0E0E0) else Color(0xFFFAFAFA)
 
                     ElevatedCard(
                         modifier = Modifier
@@ -526,10 +659,23 @@ fun HistoryScreen(onBack: () -> Unit, cardId: String? = null) {
                             ),
                         colors = CardDefaults.elevatedCardColors(containerColor = bgColor)
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(fecha, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("Tarjeta ${entry.cardType}", fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                            Text("Saldo: %.2f €".format(entry.balance), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .width(6.dp)
+                                    .height(56.dp)
+                                    .background(accentColor, RoundedCornerShape(3.dp))
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(fecha, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Tarjeta ${entry.cardType}", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    "Saldo: %.2f €".format(entry.balance),
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
                 }
